@@ -1,0 +1,35 @@
+
+project_name: WikipediaPageviewsPipeline
+
+source:
+  name: Wikimedia Pageviews
+  format: whitespace_delimited
+  columns:
+    - domain_code
+    - page_title
+    - view_count
+    - response_size
+
+schema:
+  required_columns:
+    - domain_code
+    - page_title
+    - view_count
+    - response_size
+
+  column_types:
+    domain_code: string
+    page_title: string
+    view_count: integer
+    response_size: integer
+
+validation:
+  allow_negative_views: false
+  allow_negative_response_size: false
+  allow_empty_page_title: false
+
+output:
+  raw_directory: data/raw
+  processed_directory: data/processed
+  aggregated_directory: data/aggregated
+  format: parquet
