@@ -1,0 +1,108 @@
+
+services:
+  airflow-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow_dev_password
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  warehouse-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pipeline_user
+      POSTGRES_PASSWORD: warehouse_dev_password
+      POSTGRES_DB: pageviews
+    ports:
+      - "5433:5432"
+    volumes:
+      - warehouse_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pipeline_user -d pageviews"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-init:
+    build: .
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+    environment: &airflow_environment
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow_dev_password@airflow-db/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "local-development-secret-key"
+    volumes: &airflow_volumes
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./data:/opt/airflow/data
+      - ./scripts:/opt/airflow/scripts
+    command: >
+      bash -c "airflow db migrate &&
+      (airflow users create
+      --username admin
+      --password admin
+      --firstname Pipeline
+      --lastname Admin
+      --role Admin
+      --email admin@example.com || true)"
+
+  airflow-webserver:
+    build: .
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      warehouse-db:
+        condition: service_healthy
+    environment:
+      <<: *airflow_environment
+      WAREHOUSE_HOST: warehouse-db
+      WAREHOUSE_PORT: "5432"
+      WAREHOUSE_DB: pageviews
+      WAREHOUSE_USER: pipeline_user
+      WAREHOUSE_PASSWORD: warehouse_dev_password
+    volumes: *airflow_volumes
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-scheduler:
+    build: .
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      warehouse-db:
+        condition: service_healthy
+    environment:
+      <<: *airflow_environment
+      WAREHOUSE_HOST: warehouse-db
+      WAREHOUSE_PORT: "5432"
+      WAREHOUSE_DB: pageviews
+      WAREHOUSE_USER: pipeline_user
+      WAREHOUSE_PASSWORD: warehouse_dev_password
+    volumes: *airflow_volumes
+    command: scheduler
+    restart: unless-stopped
+
+volumes:
+  airflow_db_data:
+  warehouse_db_data:
